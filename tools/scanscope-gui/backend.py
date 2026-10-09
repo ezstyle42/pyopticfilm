@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Scanner-facing control surface for the ScanScope GUI.
+
+Numpy/Qt-free: device discovery, warmup/scan orchestration, and 16-bit TIFF
+export. The Qt layer stays a thin shell over this module, mirroring how
+``tools/scanlab`` splits ``backend``/``worker`` from ``app``.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+from pyopticfilm import ScanImage, Scanner
+from pyopticfilm.device.select import model_for_device, model_is_scan_ready
+from pyopticfilm.image import save_gray16_tiff
+from pyopticfilm.scan.bringup import (
+    bringup_scan_geometry,
+    crop_scan_geometry,
+    image_crop_to_scan_area,
+)
+from pyopticfilm.usb.device import find_devices
+
+Progress = Callable[[float], None]
+CropNorm = tuple[float, float, float, float]
+
+#: Scan-mode combinations a consumer UI needs (README "Common scan-mode
+#: combinations"). Manual exposure overrides stay in the Scan Lab.
+MODE_NAMES = (
+    "Single-Pass",
+    "Multi-Pass",
+    "Adaptive Multi-Exposure",
+    "Adaptive Multi-Pass",
+)
+
+
+@dataclass(frozen=True)
+class DeviceEntry:
+    """One connected Plustek scanner offered in the device combo box."""
+
+    device_id: str
+    label: str
+    scan_ready: bool
+    model_name: str = ""
+
+
+@dataclass
+class ScanRequest:
+    """One queued scan: PPI, mode, crop, IR flag."""
+
+    dpi: int
+    mode_name: str
+    infrared: bool
+    crop_norm: CropNorm | None = None
+
+
+@dataclass
+class ScanResult:
+    """Deliverables of one finished scan request."""
+
+    image: ScanImage
+    tiff_path: Path | None = None
+    ir_path: Path | None = None
+    error: str | None = None
+
+
+def list_connected_devices() -> list[DeviceEntry]:
+    """Enumerate plugged-in Plustek scanners, scan-ready ones first."""
+    entries: list[DeviceEntry] = []
+    for info in find_devices():
+        try:
+            model = model_for_device(info.product_id, info.bcd_device)
+        except Exception:  # noqa: BLE001 - unknown revision still enumerable
+            model = None
+        scan_ready = bool(model and model_is_scan_ready(model))
+        name = (model.model if model else None) or info.product or info.device_id
+        tag = "scan-ready" if scan_ready else "probe-only"
+        entries.append(
+            DeviceEntry(
+                device_id=info.device_id,
+                label=f"{name} ({info.device_id}) — {tag}",
+                scan_ready=scan_ready,
+                model_name=model.model if model else "",
+            )
+        )
+    entries.sort(key=lambda e: (not e.scan_ready, e.device_id))
+    return entries
+
+
+def mode_kwargs(mode_name: str, n_passes: int = 1) -> dict:
+    """Map a mode name from ``MODE_NAMES`` to ``Scanner.scan`` kwargs."""
+    if mode_name not in MODE_NAMES:
+        raise ValueError(f"Unknown scan mode: {mode_name!r}")
+    multi_exposure = mode_name.startswith("Adaptive")
+    if multi_exposure:
+        passes = 1 if mode_name == "Adaptive Multi-Exposure" else max(2, n_passes)
+    else:
+        passes = 1 if mode_name == "Single-Pass" else max(2, n_passes)
+    return {"multi_exposure": multi_exposure, "n_passes": passes}
+
+
+def scan_kwargs(model, request: ScanRequest) -> dict:
+    """``Scanner.scan`` kwargs for a scan-ready model and crop, motor-safe."""
+    kwargs: dict = {"resolution": request.dpi, "mode": "color"}
+    kwargs.update(mode_kwargs(request.mode_name))
+    if request.infrared:
+        kwargs["infrared"] = True
+    if request.crop_norm is not None:
+        area = image_crop_to_scan_area(model, request.crop_norm)
+        geometry, _meta = crop_scan_geometry(model, request.dpi, area)
+        kwargs["geometry"] = geometry
+    else:
+        geometry, _meta = bringup_scan_geometry(
+            model, request.dpi, profile="preview_safe"
+        )
+        kwargs["geometry"] = geometry
+    return kwargs
+
+
+def default_output_dir() -> Path:
+    return Path("scan_out")
+
+
+def output_paths(out_dir: Path, index: int) -> tuple[Path, Path]:
+    """Colour and IR TIFF paths for the n-th scan in a session."""
+    stem = f"frame_{index:04d}"
+    return out_dir / f"{stem}.tif", out_dir / f"{stem}_ir.tif"
+
+
+class ScannerSession:
+    """Owns one open scanner for the GUI's lifetime.
+
+    USB I/O must stay off the GUI thread: the worker drives ``warmup`` /
+    ``prescan`` / ``scan`` and only the finished results cross back to Qt.
+    """
+
+    def __init__(self, device_id: str) -> None:
+        self._scanner = Scanner.open(device_id)
+        self._lock = threading.Lock()
+
+    @property
+    def model(self):
+        return self._scanner.model
+
+    @property
+    def scanner(self) -> Scanner:
+        return self._scanner
+
+    def warmup(self, on_status: Callable[[str], None] | None = None) -> None:
+        with self._lock:
+            if on_status is not None:
+                on_status("Homing carriage, warming lamp…")
+            self._scanner.warmup(home=True, lamp=True)
+            if on_status is not None:
+                on_status("Ready.")
+
+    def prescan(self, progress: Progress | None = None) -> ScanImage:
+        from tools.scanlab.backend import prescan_resolution
+
+        with self._lock:
+            geometry, _meta = bringup_scan_geometry(
+                self._scanner.model, prescan_resolution(self.model), profile="preview_safe"
+            )
+            return self._scanner.scan(
+                resolution=prescan_resolution(self.model),
+                mode="color",
+                geometry=geometry,
+                progress=progress,
+            )
+
+    def scan(
+        self,
+        request: ScanRequest,
+        *,
+        progress: Progress | None = None,
+        cancel: threading.Event | None = None,
+    ) -> ScanImage:
+        kwargs = scan_kwargs(self.model, request)
+        with self._lock:
+            return self._scanner.scan(progress=progress, cancel=cancel, **kwargs)
+
+    def save(
+        self,
+        image: ScanImage,
+        out_dir: Path,
+        index: int,
+    ) -> ScanResult:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        colour_path, ir_path = output_paths(out_dir, index)
+        image.save_tiff(colour_path)
+        if image.ir is not None:
+            save_gray16_tiff(image.ir, ir_path, dpi=image.dpi)
+        return ScanResult(
+            image=image,
+            tiff_path=colour_path,
+            ir_path=ir_path if image.ir is not None else None,
+        )
+
+    def lamp(self, on: bool, on_status: Callable[[str], None] | None = None) -> None:
+        with self._lock:
+            (self._scanner.lamp_on if on else self._scanner.lamp_off)()
+        if on_status is not None:
+            on_status(f"Lamp {'on' if on else 'off'}.")
+
+    def close(self) -> None:
+        try:
+            self._scanner.close()
+        except Exception:  # noqa: BLE001, S110 - closing must not raise into Qt
+            pass
