@@ -238,7 +238,8 @@ class MainWindow(QMainWindow):
         params.addWidget(QLabel("Passes"), 1, 2)
         params.addWidget(self.npasses_spin, 1, 3)
         params.addWidget(self.ir_check, 1, 4)
-        params.addWidget(self.autolevel_check, 2, 0, 1, 5)
+        params.addWidget(self.negative_check, 2, 0, 1, 2)
+        params.addWidget(self.autolevel_check, 2, 2, 1, 3)
         params.addWidget(self.out_btn, 0, 2)
         params.addWidget(self.out_label, 0, 3)
         layout.addLayout(params)
@@ -351,7 +352,12 @@ class MainWindow(QMainWindow):
             infrared=self.ir_check.isChecked(),
             crop_norm=self.preview.crop(),
         )
-        self.worker.set_output(self.out_dir, self.frame_index, auto_level=self.autolevel_check.isChecked())
+        self.worker.set_output(
+            self.out_dir,
+            self.frame_index,
+            negative=self.negative_check.isChecked(),
+            auto_level=self.autolevel_check.isChecked(),
+        )
         self.worker.scan(request)
 
     def on_cancel(self) -> None:
@@ -364,7 +370,10 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Scanning… {int(fraction * 100)}%")
 
     def on_prescan_ready(self, image) -> None:
-        self.preview.set_image(rgb_to_qimage(image.rgb))
+        from tools.scanscope.backend import invert_u16
+
+        rgb = invert_u16(image.rgb) if self.negative_check.isChecked() else image.rgb
+        self.preview.set_image(rgb_to_qimage(rgb))
         self.status_label.setText("Prescan done. Drag a crop or press Scan.")
 
     def on_scan_ready(self, result) -> None:

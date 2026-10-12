@@ -90,14 +90,21 @@ class ScannerWorker(QObject):
         self.status_changed.emit("Scanning…")
         image = self._session.scan(request, progress=self._emit_progress, cancel=self._cancel)
         self.status_changed.emit("Saving…")
-        result = self._session.save(image, self._out_dir, self._index, auto_level=self._auto_level)
+        result = self._session.save(
+            image,
+            self._out_dir,
+            self._index,
+            negative=self._negative,
+            auto_level=self._auto_level,
+        )
         self.scan_ready.emit(result)
 
     # --- Set per-request context from the GUI thread -----------------------
 
-    def set_output(self, out_dir, index: int, *, auto_level: bool = True) -> None:
+    def set_output(self, out_dir, index: int, *, negative: bool = True, auto_level: bool = True) -> None:
         self._out_dir = out_dir
         self._index = index
+        self._negative = negative
         self._auto_level = auto_level
 
     def _emit_progress(self, fraction: float) -> None:

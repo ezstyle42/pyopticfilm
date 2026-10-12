@@ -94,7 +94,7 @@ def test_session_save_writes_tiffs(tmp_path, monkeypatch):
     image.ir = None
     image.dpi = 1800
     image.rgb = np.full((4, 4, 3), 30000, dtype=np.uint16)
-    result = session.save(image, tmp_path / "out", 1, auto_level=False)
+    result = session.save(image, tmp_path / "out", 1, negative=False, auto_level=False)
     assert result.tiff_path == tmp_path / "out" / "frame_0001.tif"
     assert saved["path"] == result.tiff_path
     assert saved["dpi"] == 1800
@@ -161,3 +161,38 @@ def test_auto_level_u16_flat_channel_is_zero():
     rgb = np.full((16, 16, 3), 12345, dtype=np.uint16)
     out = auto_level_u16(rgb)
     assert out.max() == 0
+
+
+def test_invert_u16_flips_range():
+    import numpy as np
+
+    from tools.scanscope.backend import invert_u16
+
+    rgb = np.array([[[0, 32768, 65535]]], dtype=np.uint16)
+    out = invert_u16(rgb)
+    assert out.dtype == np.uint16
+    assert out[0, 0].tolist() == [65535, 32767, 0]
+
+
+def test_session_save_negative_inverts_before_level(monkeypatch, tmp_path):
+    import numpy as np
+
+    import tools.scanscope.backend as backend_mod
+    from tools.scanscope.backend import ScannerSession
+
+    saved = {}
+    monkeypatch.setattr(
+        backend_mod,
+        "save_rgb16_tiff",
+        lambda rgb, path, *, dpi: saved.update(rgb=rgb) or path,
+    )
+    session = ScannerSession.__new__(ScannerSession)
+    image = MagicMock()
+    image.ir = None
+    image.dpi = 1800
+    image.rgb = np.full((4, 4, 3), 30000, dtype=np.uint16)
+    session.save(image, tmp_path / "out", 1, negative=True, auto_level=False)
+    assert np.array_equal(saved["rgb"], 65535 - image.rgb)
+
+    session.save(image, tmp_path / "out", 2, negative=False, auto_level=False)
+    assert np.array_equal(saved["rgb"], image.rgb)

@@ -29,6 +29,14 @@ Progress = Callable[[float], None]
 CropNorm = tuple[float, float, float, float]
 
 
+def invert_u16(rgb: np.ndarray) -> np.ndarray:
+    """Invert a film negative to a positive (16-bit RGB)."""
+    arr = np.asarray(rgb)
+    if arr.dtype != np.uint16:
+        raise ValueError(f"invert_u16 expects uint16, got {arr.dtype}")
+    return (65535 - arr).astype(np.uint16)
+
+
 def auto_level_u16(rgb: np.ndarray) -> np.ndarray:
     """Per-channel 1-99% percentile stretch, matching the preview's look.
 
@@ -209,11 +217,21 @@ class ScannerSession:
         out_dir: Path,
         index: int,
         *,
+        negative: bool = True,
         auto_level: bool = True,
     ) -> ScanResult:
+        """Write the deliverable TIFFs.
+
+        ``negative`` inverts film to a positive first; ``auto_level`` then
+        applies the preview's percentile stretch on the (inverted) data.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         colour_path, ir_path = output_paths(out_dir, index)
-        rgb = auto_level_u16(image.rgb) if auto_level else image.rgb
+        rgb = image.rgb
+        if negative:
+            rgb = invert_u16(rgb)
+        if auto_level:
+            rgb = auto_level_u16(rgb)
         save_rgb16_tiff(rgb, colour_path, dpi=image.dpi)
         if image.ir is not None:
             save_gray16_tiff(image.ir, ir_path, dpi=image.dpi)
