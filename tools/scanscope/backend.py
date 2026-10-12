@@ -17,6 +17,7 @@ import numpy as np
 
 from pyopticfilm import ScanImage, Scanner
 from pyopticfilm.device.select import model_for_device, model_is_scan_ready
+from pyopticfilm.exceptions import PlustekError
 from pyopticfilm.image import save_gray16_tiff, save_rgb16_tiff
 from pyopticfilm.scan.bringup import (
     bringup_scan_geometry,
@@ -95,6 +96,7 @@ class ScanResult:
     image: ScanImage
     tiff_path: Path | None = None
     ir_path: Path | None = None
+    jpeg_path: Path | None = None
     error: str | None = None
 
 
@@ -157,6 +159,36 @@ def output_paths(out_dir: Path, index: int) -> tuple[Path, Path]:
     """Colour and IR TIFF paths for the n-th scan in a session."""
     stem = f"frame_{index:04d}"
     return out_dir / f"{stem}.tif", out_dir / f"{stem}_ir.tif"
+
+
+def unique_path(path: Path) -> Path:
+    """Return ``path`` unchanged, or with an appended counter if it exists."""
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    for n in range(1, 10000):
+        candidate = path.with_name(f"{stem}_{n}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise PlustekError(f"Could not find a free filename for {path}")
+
+
+def save_jpeg(rgb: np.ndarray, path: Path) -> Path:
+    """Write an 8-bit JPEG copy of the processed 16-bit RGB image."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise PlustekError("JPEG export requires Pillow") from exc
+    arr = np.asarray(rgb)
+    if arr.ndim != 3 or arr.shape[2] != 3:
+        raise PlustekError(f"rgb must be HxWx3, got shape {arr.shape}")
+    if arr.dtype == np.uint16:
+        u8 = (arr >> 8).astype(np.uint8)
+    else:
+        u8 = np.clip(arr, 0, 255).astype(np.uint8)
+    out = path.with_suffix(".jpg")
+    Image.fromarray(u8, mode="RGB").save(out, "JPEG", quality=95)
+    return out
 
 
 class ScannerSession:
@@ -232,13 +264,17 @@ class ScannerSession:
             rgb = invert_u16(rgb)
         if auto_level:
             rgb = auto_level_u16(rgb)
+        colour_path = unique_path(colour_path)
         save_rgb16_tiff(rgb, colour_path, dpi=image.dpi)
+        jpeg_path = save_jpeg(rgb, colour_path)
         if image.ir is not None:
+            ir_path = unique_path(ir_path)
             save_gray16_tiff(image.ir, ir_path, dpi=image.dpi)
         return ScanResult(
             image=image,
             tiff_path=colour_path,
             ir_path=ir_path if image.ir is not None else None,
+            jpeg_path=jpeg_path,
         )
 
     def lamp(self, on: bool, on_status: Callable[[str], None] | None = None) -> None:

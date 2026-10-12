@@ -451,10 +451,11 @@ class MainWindow(QMainWindow):
     def on_scan_ready(self, result) -> None:
         self.frame_index += 1
         self._save_frame_index()
+        msg = f"Saved {result.tiff_path}"
+        if result.jpeg_path is not None:
+            msg += f" (+ JPEG {result.jpeg_path.name})"
         if result.ir_path is not None:
-            msg = f"Saved {result.tiff_path} (+ IR {result.ir_path.name})"
-        else:
-            msg = f"Saved {result.tiff_path}"
+            msg += f" (+ IR {result.ir_path.name})"
         self.status_label.setText(msg)
 
     def on_failed(self, message: str) -> None:

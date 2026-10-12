@@ -236,3 +236,34 @@ def test_main_window_constructs_with_all_widgets(monkeypatch):
     assert not window.ir_check.isChecked()
     window.on_reset_settings()
     assert str(window.out_dir) == "scan_out"
+
+
+def test_unique_path_appends_counter(tmp_path):
+    from tools.scanscope.backend import unique_path
+
+    first = tmp_path / "frame_0001.tif"
+    assert unique_path(first) == first
+    first.touch()
+    second = unique_path(first)
+    assert second == tmp_path / "frame_0001_1.tif"
+    second.touch()
+    assert unique_path(first) == tmp_path / "frame_0001_2.tif"
+
+
+def test_save_jpeg_writes_8bit_copy(tmp_path):
+    np = pytest.importorskip("numpy")
+    from tools.scanscope.backend import save_jpeg
+
+    rgb = np.full((4, 6, 3), 65535, dtype=np.uint16)
+    rgb[0, :, :] = 0
+    out = save_jpeg(rgb, tmp_path / "frame_0001.tif")
+    assert out == tmp_path / "frame_0001.jpg"
+    assert out.exists()
+    from PIL import Image
+
+    with Image.open(out) as im:
+        assert im.format == "JPEG"
+        assert im.mode == "RGB"
+        assert im.size == (6, 4)
+        assert abs(im.getpixel((0, 0))[0] - 0) <= 2
+        assert abs(im.getpixel((5, 3))[0] - 255) <= 2

@@ -32,7 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 VENV_DIR = ROOT / ".venv"
-REQUIREMENTS = ("PyQt6>=6.6", "tifffile>=2024.2")
+REQUIREMENTS = ("PyQt6>=6.6", "tifffile>=2024.2", "Pillow>=10.0")
 PLUSTEK_VID = 0x07B3
 UDEV_RULE = (
     "# Plustek OpticFilm scanners - allow local users libusb access\n"
