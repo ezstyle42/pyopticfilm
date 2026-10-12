@@ -59,27 +59,43 @@ def gray_to_qimage(plane: np.ndarray) -> QImage:
 
 
 class PreviewLabel(QLabel):
-    """Prescan image with a draggable crop rectangle in normalised coords."""
+    """Prescan image with a draggable crop rectangle in normalised coords.
+
+    The image is letterboxed inside the widget (KeepAspectRatio), so widget
+    coordinates must be mapped through the displayed-image rectangle. The
+    stored crop is normalised against the image itself, making it stable
+    across widget resizes and exact at the moment the drag ends.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self._pixmap = None
+        self._image_rect: QRect | None = None
         self._crop: tuple[float, float, float, float] | None = None
-        self._drag_start: tuple[int, int] | None = None
-        self._drag_cur: tuple[int, int] | None = None
+        self._drag_start: tuple[float, float] | None = None
+        self._drag_cur: tuple[float, float] | None = None
         self.setMinimumSize(400, 300)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def set_image(self, image: QImage) -> None:
         self._pixmap = image
-        self.setPixmap(
-            QPixmap.fromImage(
-                image.scaled(
-                    self.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
+        self._image_rect = None
+        self._repaint()
+
+    def _displayed_rect(self) -> QRect | None:
+        """The letterboxed rect the scaled image occupies in the widget."""
+        if self._pixmap is None:
+            return None
+        scaled = self._pixmap.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        return QRect(
+            (self.width() - scaled.width()) // 2,
+            (self.height() - scaled.height()) // 2,
+            scaled.width(),
+            scaled.height(),
         )
 
     def crop(self) -> tuple[float, float, float, float] | None:
@@ -94,31 +110,49 @@ class PreviewLabel(QLabel):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self._pixmap is not None:
-            self.set_image(self._pixmap)
+            self._image_rect = None
+            self._repaint()
+
+    def _widget_to_image(self, x: float, y: float) -> tuple[float, float]:
+        """Clamp a widget point into the image, as image-pixel coordinates."""
+        rect = self._displayed_rect()
+        if rect is None:
+            return 0.0, 0.0
+        x = max(rect.x(), min(float(rect.x() + rect.width()), x))
+        y = max(rect.y(), min(float(rect.y() + rect.height()), y))
+        return x - rect.x(), y - rect.y()
+
+    def _image_to_widget(self, x: float, y: float) -> tuple[float, float]:
+        """Image-pixel coordinates back to widget coordinates (for drawing)."""
+        rect = self._displayed_rect()
+        if rect is None:
+            return 0.0, 0.0
+        return rect.x() + x, rect.y() + y
 
     def mousePressEvent(self, event) -> None:
-        self._drag_start = (int(event.position().x()), int(event.position().y()))
+        self._drag_start = (*self._widget_to_image(event.position().x(), event.position().y()),)
         self._drag_cur = self._drag_start
+        self._repaint()
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag_start is not None:
-            self._drag_cur = (int(event.position().x()), int(event.position().y()))
+            self._drag_cur = self._widget_to_image(event.position().x(), event.position().y())
             self._repaint()
 
     def mouseReleaseEvent(self, event) -> None:
         if self._drag_start is None or self._drag_cur is None:
             return
+        iw, ih = float(self._pixmap.width()), float(self._pixmap.height())
         x1, y1 = self._drag_start
         x2, y2 = self._drag_cur
-        w, h = self.width(), self.height()
         if abs(x2 - x1) * abs(y2 - y1) < 100:
             self.clear_crop()
             return
         self._crop = (
-            max(0.0, min(x1, x2) / w),
-            max(0.0, min(y1, y2) / h),
-            min(1.0, max(x1, x2) / w),
-            min(1.0, max(y1, y2) / h),
+            max(0.0, min(x1, x2) / iw),
+            max(0.0, min(y1, y2) / ih),
+            min(1.0, max(x1, x2) / iw),
+            min(1.0, max(y1, y2) / ih),
         )
         self._drag_start = None
         self._drag_cur = None
@@ -132,21 +166,24 @@ class PreviewLabel(QLabel):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        rect = self._displayed_rect()
+        if rect is None:
+            return
         painter = QPainter(canvas)
         painter.setPen(QPen(Qt.GlobalColor.red, 2))
         if self._drag_start is not None and self._drag_cur is not None:
             x1, y1 = self._drag_start
             x2, y2 = self._drag_cur
-            painter.drawRect(QRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)))
+            painter.drawRect(QRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1)))
         elif self._crop is not None:
-            w, h = canvas.width(), canvas.height()
+            iw, ih = float(self._pixmap.width()), float(self._pixmap.height())
             cx1, cy1, cx2, cy2 = self._crop
             painter.drawRect(
                 QRect(
-                    int(cx1 * w),
-                    int(cy1 * h),
-                    int((cx2 - cx1) * w),
-                    int((cy2 - cy1) * h),
+                    int(cx1 * iw),
+                    int(cy1 * ih),
+                    int((cx2 - cx1) * iw),
+                    int((cy2 - cy1) * ih),
                 )
             )
         painter.end()
