@@ -240,6 +240,8 @@ class MainWindow(QMainWindow):
         self.npasses_spin.setRange(2, 9)
         self.npasses_spin.setValue(2)
         self.ir_check = QCheckBox("Infrared dust plane")
+        self.negative_check = QCheckBox("Negative film (invert to positive)")
+        self.negative_check.setChecked(True)
         self.autolevel_check = QCheckBox("Auto-level saved TIFF (remove film colour)")
         self.autolevel_check.setChecked(True)
         self.out_label = QLabel(str(self.out_dir))

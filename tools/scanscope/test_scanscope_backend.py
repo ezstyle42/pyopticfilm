@@ -196,3 +196,43 @@ def test_session_save_negative_inverts_before_level(monkeypatch, tmp_path):
 
     session.save(image, tmp_path / "out", 2, negative=False, auto_level=False)
     assert np.array_equal(saved["rgb"], image.rgb)
+
+
+def test_main_window_constructs_with_all_widgets(monkeypatch):
+    try:
+        from PyQt6.QtWidgets import QApplication
+    except (ImportError, OSError) as exc:
+        pytest.skip(f"Qt native libs unavailable: {exc}")
+
+    import tools.scanscope.app as app_mod
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(app_mod, "list_connected_devices", list)
+    window = app_mod.MainWindow()
+    for attr in (
+        "device_combo",
+        "refresh_btn",
+        "warmup_btn",
+        "lamp_btn",
+        "ppi_combo",
+        "mode_combo",
+        "npasses_spin",
+        "ir_check",
+        "negative_check",
+        "autolevel_check",
+        "out_label",
+        "out_btn",
+        "preview",
+        "prescan_btn",
+        "scan_btn",
+        "cancel_btn",
+        "clear_crop_btn",
+        "reset_btn",
+        "status_label",
+    ):
+        assert hasattr(window, attr), f"MainWindow missing widget: {attr}"
+    assert window.negative_check.isChecked()
+    assert window.autolevel_check.isChecked()
+    assert not window.ir_check.isChecked()
+    window.on_reset_settings()
+    assert str(window.out_dir) == "scan_out"
