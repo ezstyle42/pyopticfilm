@@ -54,16 +54,45 @@ def test_scan_kwargs_full_frame_8200i_se():
     assert kwargs["geometry"] is not None
 
 
-def test_scan_kwargs_crop_uses_crop_geometry():
-    request = ScanRequest(
-        dpi=2400,
-        mode_name="Single-Pass",
-        infrared=False,
-        crop_norm=(0.1, 0.1, 0.9, 0.9),
-    )
-    kwargs = scan_kwargs(MODEL_8200I_SE, request)
-    assert kwargs["n_passes"] == 1
-    assert kwargs["geometry"] is not None
+def test_scan_kwargs_crop_also_uses_full_window_geometry():
+    full = ScanRequest(dpi=2400, mode_name="Single-Pass", infrared=False, crop_norm=None)
+    cropped = ScanRequest(dpi=2400, mode_name="Single-Pass", infrared=False, crop_norm=(0.1, 0.1, 0.9, 0.9))
+    full_kwargs = scan_kwargs(MODEL_8200I_SE, full)
+    crop_kwargs = scan_kwargs(MODEL_8200I_SE, cropped)
+    assert crop_kwargs["n_passes"] == 1
+    assert crop_kwargs["geometry"] is not None
+    assert full_kwargs["geometry"] is not None
+    assert "area" not in crop_kwargs
+
+
+def test_crop_scanimage_exact_selection():
+    import numpy as np
+
+    from pyopticfilm.image import ScanImage
+    from tools.scanscope.backend import crop_scanimage
+
+    rgb = np.arange(100 * 200 * 3, dtype=np.uint16).reshape(100, 200, 3)
+    ir = np.arange(100 * 200, dtype=np.uint16).reshape(100, 200)
+    image = ScanImage(rgb=rgb, dpi=1800, ir=ir)
+    crop = (0.25, 0.5, 0.75, 1.0)
+    out = crop_scanimage(image, crop)
+    assert out is image
+    assert out.rgb.shape == (50, 100, 3)
+    assert out.ir.shape == (50, 100)
+    assert np.array_equal(out.rgb, rgb[50:100, 50:150, :])
+    assert np.array_equal(out.ir, ir[50:100, 50:150])
+
+
+def test_crop_scanimage_noop_on_empty():
+    import numpy as np
+
+    from pyopticfilm.image import ScanImage
+    from tools.scanscope.backend import crop_scanimage
+
+    rgb = np.zeros((10, 10, 3), dtype=np.uint16)
+    image = ScanImage(rgb=rgb, dpi=1800)
+    out = crop_scanimage(image, (0.5, 0.5, 0.5, 0.5))
+    assert out.rgb.shape == (10, 10, 3)
 
 
 def test_scan_kwargs_without_ir_omits_flag():

@@ -468,6 +468,10 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(busy)
 
     def closeEvent(self, event) -> None:
+        dpi = self.ppi_combo.currentData()
+        if dpi is not None:
+            self.settings.setValue("ppi", dpi)
+        self.settings.sync()
         if self.session:
             self.session.close()
         super().closeEvent(event)

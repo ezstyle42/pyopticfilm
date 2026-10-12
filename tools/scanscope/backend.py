@@ -19,11 +19,7 @@ from pyopticfilm import ScanImage, Scanner
 from pyopticfilm.device.select import model_for_device, model_is_scan_ready
 from pyopticfilm.exceptions import PlustekError
 from pyopticfilm.image import save_gray16_tiff, save_rgb16_tiff
-from pyopticfilm.scan.bringup import (
-    bringup_scan_geometry,
-    crop_scan_geometry,
-    image_crop_to_scan_area,
-)
+from pyopticfilm.scan.bringup import bringup_scan_geometry
 from pyopticfilm.usb.device import find_devices
 
 Progress = Callable[[float], None]
@@ -136,19 +132,47 @@ def mode_kwargs(mode_name: str, n_passes: int = 1) -> dict:
 
 
 def scan_kwargs(model, request: ScanRequest) -> dict:
-    """``Scanner.scan`` kwargs for a scan-ready model and crop, motor-safe."""
+    """``Scanner.scan`` kwargs for a scan-ready model, motor-safe.
+
+    The scan always captures the same full preview_safe window as the
+    prescan; a crop selection is applied to the captured array in software
+    (see :func:`crop_scanimage`) so the output matches the selection exactly,
+    independent of optical span alignment and motor rounding.
+    """
     kwargs: dict = {"resolution": request.dpi, "mode": "color"}
     kwargs.update(mode_kwargs(request.mode_name))
     if request.infrared:
         kwargs["infrared"] = True
-    if request.crop_norm is not None:
-        area = image_crop_to_scan_area(model, request.crop_norm)
-        geometry, _meta = crop_scan_geometry(model, request.dpi, area)
-        kwargs["geometry"] = geometry
-    else:
-        geometry, _meta = bringup_scan_geometry(model, request.dpi, profile="preview_safe")
-        kwargs["geometry"] = geometry
+    geometry, _meta = bringup_scan_geometry(model, request.dpi, profile="preview_safe")
+    kwargs["geometry"] = geometry
     return kwargs
+
+
+def crop_scanimage(image: ScanImage, crop_norm: CropNorm) -> ScanImage:
+    """Apply a display-space normalized crop to a captured :class:`ScanImage`.
+
+    ``crop_norm`` is (x1, y1, x2, y2) in 0..1 over the image, exactly as drawn
+    on the prescan preview. Mutates and returns ``image``.
+    """
+
+    x1, y1, x2, y2 = crop_norm
+    if x2 <= x1 or y2 <= y1:
+        return image
+    h, w = image.rgb.shape[:2]
+    xs = max(0, min(w - 1, round(x1 * w)))
+    xe = max(xs + 1, min(w, round(x2 * w)))
+    ys = max(0, min(h - 1, round(y1 * h)))
+    ye = max(ys + 1, min(h, round(y2 * h)))
+    image.rgb = image.rgb[ys:ye, xs:xe, :]
+    if image.ir is not None:
+        ir = image.ir
+        ih, iw = ir.shape[:2]
+        ixs = max(0, min(iw - 1, round(x1 * iw)))
+        ixe = max(ixs + 1, min(iw, round(x2 * iw)))
+        iys = max(0, min(ih - 1, round(y1 * ih)))
+        iye = max(iys + 1, min(ih, round(y2 * ih)))
+        image.ir = ir[iys:iye, ixs:ixe]
+    return image
 
 
 def default_output_dir() -> Path:
@@ -241,7 +265,10 @@ class ScannerSession:
     ) -> ScanImage:
         kwargs = scan_kwargs(self.model, request)
         with self._lock:
-            return self._scanner.scan(progress=progress, cancel=cancel, **kwargs)
+            image = self._scanner.scan(progress=progress, cancel=cancel, **kwargs)
+        if request.crop_norm is not None:
+            crop_scanimage(image, request.crop_norm)
+        return image
 
     def save(
         self,
