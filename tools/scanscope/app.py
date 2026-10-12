@@ -226,6 +226,8 @@ class MainWindow(QMainWindow):
         self.npasses_spin.setRange(2, 9)
         self.npasses_spin.setValue(2)
         self.ir_check = QCheckBox("Infrared dust plane")
+        self.autolevel_check = QCheckBox("Auto-level saved TIFF (remove film colour)")
+        self.autolevel_check.setChecked(True)
         self.out_label = QLabel(str(self.out_dir))
         self.out_btn = QPushButton("Choose folder…")
         self.out_btn.clicked.connect(self.on_choose_out)
@@ -236,6 +238,7 @@ class MainWindow(QMainWindow):
         params.addWidget(QLabel("Passes"), 1, 2)
         params.addWidget(self.npasses_spin, 1, 3)
         params.addWidget(self.ir_check, 1, 4)
+        params.addWidget(self.autolevel_check, 2, 0, 1, 5)
         params.addWidget(self.out_btn, 0, 2)
         params.addWidget(self.out_label, 0, 3)
         layout.addLayout(params)
@@ -348,7 +351,7 @@ class MainWindow(QMainWindow):
             infrared=self.ir_check.isChecked(),
             crop_norm=self.preview.crop(),
         )
-        self.worker.set_output(self.out_dir, self.frame_index)
+        self.worker.set_output(self.out_dir, self.frame_index, auto_level=self.autolevel_check.isChecked())
         self.worker.scan(request)
 
     def on_cancel(self) -> None:

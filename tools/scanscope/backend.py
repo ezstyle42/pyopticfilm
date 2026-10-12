@@ -13,9 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from pyopticfilm import ScanImage, Scanner
 from pyopticfilm.device.select import model_for_device, model_is_scan_ready
-from pyopticfilm.image import save_gray16_tiff
+from pyopticfilm.image import save_gray16_tiff, save_rgb16_tiff
 from pyopticfilm.scan.bringup import (
     bringup_scan_geometry,
     crop_scan_geometry,
@@ -25,6 +27,28 @@ from pyopticfilm.usb.device import find_devices
 
 Progress = Callable[[float], None]
 CropNorm = tuple[float, float, float, float]
+
+
+def auto_level_u16(rgb: np.ndarray) -> np.ndarray:
+    """Per-channel 1-99% percentile stretch, matching the preview's look.
+
+    Same percentile policy as ``tools.scanlab.preview.auto_level_u8`` (probe
+    on a subsampled copy, full-res stretch), but in 16-bit so the saved TIFF
+    has the film-base colour removed like the GUI preview shows it.
+    """
+    arr = np.asarray(rgb)
+    probe = arr[::8, ::8] if min(arr.shape[:2]) >= 32 else arr
+    out = np.empty_like(arr)
+    for c in range(arr.shape[2]):
+        lo, hi = np.percentile(probe[:, :, c].astype(np.float32), (1.0, 99.0))
+        plane = arr[:, :, c].astype(np.float32)
+        if hi <= lo:
+            out[:, :, c] = 0
+        else:
+            scaled = (plane - lo) * (65535.0 / (hi - lo))
+            out[:, :, c] = np.clip(scaled, 0, 65535).astype(np.uint16)
+    return out
+
 
 #: Scan-mode combinations a consumer UI needs (README "Common scan-mode
 #: combinations"). Manual exposure overrides stay in the Scan Lab.
@@ -184,10 +208,13 @@ class ScannerSession:
         image: ScanImage,
         out_dir: Path,
         index: int,
+        *,
+        auto_level: bool = True,
     ) -> ScanResult:
         out_dir.mkdir(parents=True, exist_ok=True)
         colour_path, ir_path = output_paths(out_dir, index)
-        image.save_tiff(colour_path)
+        rgb = auto_level_u16(image.rgb) if auto_level else image.rgb
+        save_rgb16_tiff(rgb, colour_path, dpi=image.dpi)
         if image.ir is not None:
             save_gray16_tiff(image.ir, ir_path, dpi=image.dpi)
         return ScanResult(
