@@ -88,7 +88,7 @@ class ScannerWorker(QObject):
 
     def _do_scan(self, request: ScanRequest) -> None:
         self.status_changed.emit("Scanning…")
-        image, full = self._session.scan(request, progress=self._emit_progress, cancel=self._cancel)
+        image = self._session.scan(request, progress=self._emit_progress, cancel=self._cancel)
         self.status_changed.emit("Saving…")
         result = self._session.save(
             image,
@@ -96,7 +96,6 @@ class ScannerWorker(QObject):
             self._index,
             negative=self._negative,
             auto_level=self._auto_level,
-            full_frame=full,
         )
         self.scan_ready.emit(result)
 

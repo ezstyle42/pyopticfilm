@@ -93,8 +93,6 @@ class ScanResult:
     tiff_path: Path | None = None
     ir_path: Path | None = None
     jpeg_path: Path | None = None
-    full_frame: ScanImage | None = None
-    full_frame_path: Path | None = None
     error: str | None = None
 
 
@@ -264,25 +262,13 @@ class ScannerSession:
         *,
         progress: Progress | None = None,
         cancel: threading.Event | None = None,
-    ) -> tuple[ScanImage, ScanImage | None]:
-        """Capture the full window; return ``(cropped, full_frame)``.
-
-        ``full_frame`` is the uncropped capture (``None`` when no crop was
-        selected); ``cropped`` is the exact software crop of it.
-        """
+    ) -> ScanImage:
         kwargs = scan_kwargs(self.model, request)
         with self._lock:
             image = self._scanner.scan(progress=progress, cancel=cancel, **kwargs)
-        full = None
         if request.crop_norm is not None:
-            full = ScanImage(
-                rgb=image.rgb.copy(),
-                dpi=image.dpi,
-                device_model=image.device_model,
-                ir=image.ir.copy() if image.ir is not None else None,
-            )
             crop_scanimage(image, request.crop_norm)
-        return image, full
+        return image
 
     def save(
         self,
@@ -292,7 +278,6 @@ class ScannerSession:
         *,
         negative: bool = True,
         auto_level: bool = True,
-        full_frame: ScanImage | None = None,
     ) -> ScanResult:
         """Write the deliverable TIFFs.
 
@@ -312,23 +297,11 @@ class ScannerSession:
         if image.ir is not None:
             ir_path = unique_path(ir_path)
             save_gray16_tiff(image.ir, ir_path, dpi=image.dpi)
-        full_frame_path = None
-        if full_frame is not None:
-            full_rgb = full_frame.rgb
-            if negative:
-                full_rgb = invert_u16(full_rgb)
-            if auto_level:
-                full_rgb = auto_level_u16(full_rgb)
-            full_path = colour_path.with_name(colour_path.stem + "_full.tif")
-            full_frame_path = unique_path(full_path)
-            save_rgb16_tiff(full_rgb, full_frame_path, dpi=full_frame.dpi)
         return ScanResult(
             image=image,
             tiff_path=colour_path,
             ir_path=ir_path if image.ir is not None else None,
             jpeg_path=jpeg_path,
-            full_frame=full_frame,
-            full_frame_path=full_frame_path,
         )
 
     def lamp(self, on: bool, on_status: Callable[[str], None] | None = None) -> None:
