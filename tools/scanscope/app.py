@@ -456,6 +456,19 @@ class MainWindow(QMainWindow):
             msg += f" (+ JPEG {result.jpeg_path.name})"
         if result.ir_path is not None:
             msg += f" (+ IR {result.ir_path.name})"
+        if result.full_frame_path is not None:
+            msg += f" (+ full capture {result.full_frame_path.name})"
+        if result.full_frame is not None:
+            from tools.scanscope.backend import invert_u16
+
+            full = result.full_frame
+            rgb = invert_u16(full.rgb) if self.negative_check.isChecked() else full.rgb
+            self.preview.set_image(rgb_to_qimage(rgb))
+        elif result.image is not None:
+            from tools.scanscope.backend import invert_u16
+
+            rgb = invert_u16(result.image.rgb) if self.negative_check.isChecked() else result.image.rgb
+            self.preview.set_image(rgb_to_qimage(rgb))
         self.status_label.setText(msg)
 
     def on_failed(self, message: str) -> None:
