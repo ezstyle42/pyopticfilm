@@ -73,10 +73,12 @@ class PreviewLabel(QLabel):
     def set_image(self, image: QImage) -> None:
         self._pixmap = image
         self.setPixmap(
-            image.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+            QPixmap.fromImage(
+                image.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
         )
 
