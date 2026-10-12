@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, QSettings, Qt
 from PyQt6.QtGui import QImage, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -34,6 +34,19 @@ from tools.scanscope.backend import (
     list_connected_devices,
 )
 from tools.scanscope.worker import ScannerWorker
+
+SETTINGS_ORG = "pyopticfilm"
+SETTINGS_APP = "scanscope"
+DEFAULT_SETTINGS = {
+    "out_dir": "scan_out",
+    "ppi": 1800,
+    "mode": MODE_NAMES[0],
+    "n_passes": 2,
+    "infrared": False,
+    "negative": True,
+    "auto_level": True,
+    "frame_index": 1,
+}
 
 
 def rgb_to_qimage(rgb: np.ndarray) -> QImage:
@@ -194,6 +207,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ScanScope — Plustek OpticFilm")
+        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self.devices: list[DeviceEntry] = []
         self.session: ScannerSession | None = None
         self.worker: ScannerWorker | None = None
@@ -264,11 +278,64 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.cancel_btn, 0, 3)
         layout.addLayout(actions)
 
+        self.reset_btn = QPushButton("Reset settings")
+        self.reset_btn.clicked.connect(self.on_reset_settings)
+        actions.addWidget(self.reset_btn, 0, 4)
+
         self.status_label = QLabel("Connect a scanner and press Refresh.")
         layout.addWidget(self.status_label)
 
         self.setCentralWidget(central)
+
+        self._load_settings()
+        self._connect_settings_changed()
+
         self.refresh_devices()
+
+    # --- Persistent settings -------------------------------------------------
+
+    def _load_settings(self) -> None:
+        """Apply persisted settings to the widgets (safe against bad values)."""
+        out_dir = str(self.settings.value("out_dir", DEFAULT_SETTINGS["out_dir"]))
+        self.out_dir = Path(out_dir)
+        self.out_label.setText(out_dir)
+
+        mode = str(self.settings.value("mode", DEFAULT_SETTINGS["mode"]))
+        pos = self.mode_combo.findText(mode)
+        self.mode_combo.setCurrentIndex(max(pos, 0))
+
+        self.npasses_spin.setValue(int(self.settings.value("n_passes", DEFAULT_SETTINGS["n_passes"])))
+        self.ir_check.setChecked(self.settings.value("infrared", DEFAULT_SETTINGS["infrared"], type=bool))
+        self.negative_check.setChecked(self.settings.value("negative", DEFAULT_SETTINGS["negative"], type=bool))
+        self.autolevel_check.setChecked(self.settings.value("auto_level", DEFAULT_SETTINGS["auto_level"], type=bool))
+        self.frame_index = int(self.settings.value("frame_index", DEFAULT_SETTINGS["frame_index"]))
+
+    def _connect_settings_changed(self) -> None:
+        self.mode_combo.currentTextChanged.connect(lambda mode: self.settings.setValue("mode", mode))
+        self.npasses_spin.valueChanged.connect(lambda n: self.settings.setValue("n_passes", n))
+        self.ir_check.toggled.connect(lambda on: self.settings.setValue("infrared", on))
+        self.negative_check.toggled.connect(lambda on: self.settings.setValue("negative", on))
+        self.autolevel_check.toggled.connect(lambda on: self.settings.setValue("auto_level", on))
+        self.ppi_combo.currentIndexChanged.connect(lambda: self.settings.setValue("ppi", self.ppi_combo.currentData()))
+
+    def _save_frame_index(self) -> None:
+        self.settings.setValue("frame_index", self.frame_index)
+
+    def on_reset_settings(self) -> None:
+        """Restore every option to its default."""
+        self.settings.clear()
+        self.out_dir = default_output_dir()
+        self.out_label.setText(str(self.out_dir))
+        self.mode_combo.setCurrentIndex(0)
+        self.npasses_spin.setValue(DEFAULT_SETTINGS["n_passes"])
+        self.ir_check.setChecked(DEFAULT_SETTINGS["infrared"])
+        self.negative_check.setChecked(DEFAULT_SETTINGS["negative"])
+        self.autolevel_check.setChecked(DEFAULT_SETTINGS["auto_level"])
+        self.frame_index = DEFAULT_SETTINGS["frame_index"]
+        pos = self.ppi_combo.findData(DEFAULT_SETTINGS["ppi"])
+        if pos >= 0:
+            self.ppi_combo.setCurrentIndex(pos)
+        self.status_label.setText("Settings reset to defaults.")
 
     # --- Device management ---------------------------------------------------
 
@@ -303,9 +370,11 @@ class MainWindow(QMainWindow):
         self.ppi_combo.clear()
         for dpi in sorted(session.model.resolutions_dpi):
             self.ppi_combo.addItem(str(dpi), dpi)
-        default = 1800
-        pos = self.ppi_combo.findData(default)
-        self.ppi_combo.setCurrentIndex(max(0, pos))
+        saved_ppi = int(self.settings.value("ppi", DEFAULT_SETTINGS["ppi"]))
+        pos = self.ppi_combo.findData(saved_ppi)
+        if pos < 0:
+            pos = max(0, self.ppi_combo.findData(DEFAULT_SETTINGS["ppi"]))
+        self.ppi_combo.setCurrentIndex(pos)
         self.ir_check.setEnabled(bool(getattr(session.model, "supports_infrared", False)))
         self.status_label.setText(f"{session.model.model} open. Press Warmup.")
 
@@ -332,6 +401,7 @@ class MainWindow(QMainWindow):
         if chosen:
             self.out_dir = Path(chosen)
             self.out_label.setText(chosen)
+            self.settings.setValue("out_dir", chosen)
 
     # --- Prescan / scan --------------------------------------------------------
 
@@ -378,6 +448,7 @@ class MainWindow(QMainWindow):
 
     def on_scan_ready(self, result) -> None:
         self.frame_index += 1
+        self._save_frame_index()
         if result.ir_path is not None:
             msg = f"Saved {result.tiff_path} (+ IR {result.ir_path.name})"
         else:
