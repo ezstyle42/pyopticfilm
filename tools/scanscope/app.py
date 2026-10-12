@@ -72,10 +72,13 @@ class PreviewLabel(QLabel):
 
     def set_image(self, image: QImage) -> None:
         self._pixmap = image
-        self.setPixmap(image.scaled(
-            self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        ))
+        self.setPixmap(
+            image.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def crop(self) -> tuple[float, float, float, float] | None:
         return self._crop
@@ -123,7 +126,8 @@ class PreviewLabel(QLabel):
         if self._pixmap is None:
             return
         canvas = QPixmap.fromImage(self._pixmap).scaled(
-            self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
         painter = QPainter(canvas)
@@ -135,9 +139,14 @@ class PreviewLabel(QLabel):
         elif self._crop is not None:
             w, h = canvas.width(), canvas.height()
             cx1, cy1, cx2, cy2 = self._crop
-            painter.drawRect(QRect(
-                int(cx1 * w), int(cy1 * h), int((cx2 - cx1) * w), int((cy2 - cy1) * h),
-            ))
+            painter.drawRect(
+                QRect(
+                    int(cx1 * w),
+                    int(cy1 * h),
+                    int((cx2 - cx1) * w),
+                    int((cy2 - cy1) * h),
+                )
+            )
         painter.end()
         self.setPixmap(canvas)
 

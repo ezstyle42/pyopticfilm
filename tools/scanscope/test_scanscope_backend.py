@@ -67,9 +67,7 @@ def test_scan_kwargs_crop_uses_crop_geometry():
 
 
 def test_scan_kwargs_without_ir_omits_flag():
-    request = ScanRequest(
-        dpi=1800, mode_name="Single-Pass", infrared=False, crop_norm=None
-    )
+    request = ScanRequest(dpi=1800, mode_name="Single-Pass", infrared=False, crop_norm=None)
     assert "infrared" not in scan_kwargs(MODEL_8200I_SE, request)
 
 

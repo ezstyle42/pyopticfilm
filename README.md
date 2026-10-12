@@ -97,6 +97,23 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="07b3", MODE="0666"
 
 Reload udev rules and replug the scanner.
 
+## ScanScope GUI (one-command frontend)
+
+`scanscope.py` is a single self-installing launcher for the end-user GUI
+(`tools/scanscope/`): warmup, prescan with a drag crop, PPI and scan-mode
+selection (Single-Pass, Multi-Pass, Adaptive Multi-Exposure, Adaptive
+Multi-Pass), infrared dust plane, and 16-bit TIFF output.
+
+```bash
+python3 scanscope.py
+```
+
+On first run it creates a private venv at `.venv` (nothing is installed into
+the externally managed system Python), installs the driver from this checkout
+plus PyQt6/tifffile, checks the libusb backend and USB visibility, then opens
+the GUI. Options: `--recreate` (rebuild the venv), `--no-gui` (setup only),
+`--udev` (install the Plustek udev access rule via sudo).
+
 ## Quick start
 
 ```python

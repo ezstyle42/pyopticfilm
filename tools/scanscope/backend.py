@@ -112,9 +112,7 @@ def scan_kwargs(model, request: ScanRequest) -> dict:
         geometry, _meta = crop_scan_geometry(model, request.dpi, area)
         kwargs["geometry"] = geometry
     else:
-        geometry, _meta = bringup_scan_geometry(
-            model, request.dpi, profile="preview_safe"
-        )
+        geometry, _meta = bringup_scan_geometry(model, request.dpi, profile="preview_safe")
         kwargs["geometry"] = geometry
     return kwargs
 
